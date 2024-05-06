@@ -1,5 +1,5 @@
-#ifndef ENCRYPTION_H
-#define ENCRYPTION_H
+#ifndef SUM_H
+#define SUM_H
 
 #include <openssl/ec.h>
 #include <openssl/err.h>
@@ -11,4 +11,4 @@ EC_KEY *create_key(void);
 unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 			size_t *secret_len);
 
-#endif // ENCRYPTION_H
+#endif // SUM_H
