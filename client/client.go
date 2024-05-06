@@ -1,10 +1,23 @@
 package main
 
-import (
-	"bufio"
-	"fmt"
-	"net"
-)
+/*
+#cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include
+#cgo LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -lcrypto -L. -lcry
+#include "sum.h"
+*/
+import "C"
+import "fmt"
+
+func main() {
+	key := C.create_key()
+	if key == nil {
+		fmt.Println("Failed to create key")
+		return
+	}
+	defer C.EC_KEY_free(key)
+
+	fmt.Println("Key created successfully")
+}
 
 // type ClientState int
 
@@ -26,7 +39,7 @@ import (
 // 	err error
 // 	ip net.IP
 // 	port int
-// 	conn net.TCPConn 
+// 	conn net.TCPConn
 // 	writer *bufio.ReadWriter
 // 	privateKey string
 // 	publicKey string
@@ -69,8 +82,6 @@ import (
 // func(fsm *ClientFSM) termination_state() ClientState {
 // 	return 1
 // }
-
-
 
 // func (fsm *ClientFSM) Run() {
 // 	for {
