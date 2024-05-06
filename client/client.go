@@ -3,7 +3,7 @@ package main
 /*
 #cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include
 #cgo LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -lcrypto -L. -lcry
-#include "sum.h"
+#include "key.h"
 */
 import "C"
 import "fmt"
