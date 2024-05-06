@@ -16,7 +16,13 @@ func main() {
 	}
 	defer C.EC_KEY_free(key)
 
-	fmt.Println("Key created successfully")
+
+	pubKeyStr := C.get_public_key(key)
+	privKeyStr := C.get_private_key(key)
+	defer C.free_string(pubKeyStr)
+	defer C.free_string(privKeyStr)
+
+	fmt.Println("Key created %s, %s :", C.GoString(pubKeyStr), C.GoString(privKeyStr))
 }
 
 // type ClientState int
