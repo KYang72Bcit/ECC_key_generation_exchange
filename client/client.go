@@ -7,31 +7,16 @@ package main
 */
 import "C"
 import (
-	"bufio"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
 	"unsafe"
 )
-
-// func main() {
-// 	key := C.create_key()
-// 	if key == nil {
-// 		fmt.Println("Failed to create key")
-// 		return
-// 	}
-// 	defer C.EC_KEY_free(key)
-
-// 	pubKeyStr := C.get_public_key(key)
-// 	privKeyStr := C.get_private_key(key)
-// 	defer C.free_string(pubKeyStr)
-// 	defer C.free_string(privKeyStr)
-
-// 	fmt.Println("Key created: ", C.GoString(pubKeyStr), C.GoString(privKeyStr))
-// }
 
 type ClientState int
 
@@ -55,12 +40,10 @@ type ClientFSM struct {
 	ip net.IP
 	port int
 	conn net.Conn
-	writer *bufio.ReadWriter
 	key *C.EC_KEY
-	// publicKey *_Ctype_char
-	// privateKey *_Ctype_char
 	privateKey string
 	publicKey string
+	peerKey *C.EC_POINT
 	shareSecret string
 	message *string
 }
@@ -141,11 +124,15 @@ func(fsm *ClientFSM) sent_message_state() ClientState {
 func(fsm *ClientFSM) key_exchange_state() ClientState {
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go sendKey(&wg, fsm.conn)
-	go receiveKey(&wg, fsm.conn)
+	go sendKey(&wg, fsm.conn, fsm.key, fsm.err)
+	go receiveKey(&wg, fsm.conn, fsm.peerKey, fsm.err)
 	wg.Wait()
+	if fsm.err != nil {
+		return FatalError
+	}
 	return GenerateSharedSecret
 }
+
 
 func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
 	return 1
@@ -168,7 +155,6 @@ func(fsm *ClientFSM) termination_state() {
 	if fsm.conn != nil {
 		fsm.conn.Close()
 	}
-	// defer C.EC_KEY_free(fsm.key)
 
 	fmt.Println("client exiting...")
 
@@ -216,17 +202,70 @@ func validatePort(port string) (int, error) {
 	return portNo, nil
 }
 
-func sendKey(wg *sync.WaitGroup, conn net.Conn) {
+//goroutine should not have a return value 
+func sendKey(wg *sync.WaitGroup, conn net.Conn,key *C.EC_KEY, er error) {
 	defer wg.Done()
+	keyToSend, x, y := getPublicKey(key)
+	xLength := int32(x)
+	yLength := int32(y)
+	keyLength := xLength + yLength
+	bytes := make([]byte, 4)
+	//send x
+	binary.BigEndian.PutUint32(bytes, uint32(xLength))
 
+	if _, err := conn.Write(bytes); err != nil {
+		er = err
+		return 
+	}
 
+	//send y
+	binary.BigEndian.PutUint32(bytes, uint32(yLength))
+	if _, err := conn.Write(bytes); err != nil {
+		er = err
+		return 
+	}
 
+	//send key length
+	binary.BigEndian.PutUint32(bytes, uint32(keyLength))
+	if _, err := conn.Write(bytes); err != nil {
+		er = err
+		return 
+	}
+
+	if _, err := conn.Write(keyToSend); err != nil {
+		er = err
+		return 
+	}
 }
 
-func receiveKey(wg *sync.WaitGroup, conn net.Conn) {
+// goroutine should not have a return value 
+func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerKey *C.EC_POINT, er error) {
 	defer wg.Done()
+	//get x length 
+	bytes := make([]byte, 4)
+    if _, err := io.ReadFull(conn, bytes); err != nil {
+        er = err
+		return
+    }
+    x := binary.BigEndian.Uint32(bytes)
 
+	//get y length
+    if _, err := io.ReadFull(conn, bytes); err != nil {
+        er = err
+		return
+    }
+    y := binary.BigEndian.Uint32(bytes)
 
+    // get key 
+    key := make([]byte, x + y)
+    if _, err := io.ReadFull(conn, key); err != nil {
+        er = err
+		return
+    }
+	xCor := key[:x]
+	yCor := key[x:]
+
+	peerKey = bytesToECPoint(xCor, yCor)
 }
 
 func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
@@ -234,12 +273,19 @@ func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
 	point := C.get_public_key(key, &x, &y)
 	defer C.free(unsafe.Pointer(point))
 
-	// 将C数组转换为Go切片
 	length := int(x + y)
 	keyBytes := C.GoBytes(unsafe.Pointer(point), C.int(length))
 	return keyBytes, int(x), int(y)
 }
 
+func bytesToECPoint(xCor, yCor []byte) *C.EC_POINT {
+    x := C.CBytes(xCor)
+    y := C.CBytes(yCor)
+    defer C.free(unsafe.Pointer(x))
+    defer C.free(unsafe.Pointer(y))
+
+    return C.bytesToECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
+}
 
 func main() {
 	clientFSM := NewClientFSM()

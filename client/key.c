@@ -99,6 +99,41 @@ char* get_private_key_str(EC_KEY* key) {
 	return priv_key_str;
 }
 
+EC_POINT* bytesToECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes, int yLen) {
+    BIGNUM *x = BN_bin2bn(xBytes, xLen, NULL);
+    BIGNUM *y = BN_bin2bn(yBytes, yLen, NULL);
+    if (x == NULL || y == NULL) {
+		BN_free(x);               
+		BN_free(y);
+        return NULL; 
+    }
+
+	EC_KEY *new_key = EC_KEY_new_by_curve_name(NID_brainpoolP256r1);
+	if (!new_key) {
+		BN_free(x);               
+		BN_free(y);
+		return NULL
+	}
+
+	const EC_GROUP *group = EC_KEY_get0_group(new_key);
+	EC_POINT *pub_key = EC_POINT_new(group);
+	if (!pub_key) {
+		BN_free(x);               
+		BN_free(y);
+		return NULL
+	}
+
+	if (!EC_POINT_set_affine_coordinates_GFp(group, pub_key, x, y, NULL)) {
+		BN_free(x);               
+		BN_free(y);
+		return NULL
+	}
+
+    BN_free(x);               
+	BN_free(y);
+
+	return pub_key
+}
 
 void free_string(char* str) {
     free(str);
