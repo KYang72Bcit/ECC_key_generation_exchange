@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
+	"unsafe"
 )
 
 // func main() {
@@ -54,6 +56,9 @@ type ClientFSM struct {
 	port int
 	conn net.Conn
 	writer *bufio.ReadWriter
+	key *_Ctype_struct_ec_key_st
+	// publicKey *_Ctype_char
+	// privateKey *_Ctype_char
 	privateKey string
 	publicKey string
 	shareSecret string
@@ -87,6 +92,7 @@ func(fsm *ClientFSM) init_state() ClientState {
 
 	if *msg == "" {
 		fsm.err = errors.New("No message to encrypt")
+		return FatalError
 	}
 
 	fsm.message = msg
@@ -100,16 +106,15 @@ func(fsm *ClientFSM) key_generation_state() ClientState {
 		fsm.err = errors.New("fail to generate key")
 		return FatalError
 	}
-	defer C.EC_KEY_free(key)
-
-	pubKeyStr := C.get_public_key(key)
-	privKeyStr := C.get_private_key(key)
+	fsm.key = key
+	pubKeyStr := C.get_public_key_str(key)
+	privKeyStr := C.get_private_key_str(key)
 	defer C.free_string(pubKeyStr)
 	defer C.free_string(privKeyStr)
 	fsm.publicKey = C.GoString(pubKeyStr)
 	fsm.privateKey = C.GoString(privKeyStr)
-	fmt.Println("public key", pubKeyStr)
-	fmt.Println("public key", privKeyStr)
+	fmt.Println("public key", fsm.publicKey)
+	fmt.Println("private key", fsm.privateKey)
 	return EstablishConnection
 }
 
@@ -134,8 +139,11 @@ func(fsm *ClientFSM) sent_message_state() ClientState {
 
 
 func(fsm *ClientFSM) key_exchange_state() ClientState {
-	
-
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go sendKey(&wg, fsm.conn)
+	go receiveKey(&wg, fsm.conn)
+	wg.Wait()
 	return GenerateSharedSecret
 }
 
@@ -160,8 +168,9 @@ func(fsm *ClientFSM) termination_state() {
 	if fsm.conn != nil {
 		fsm.conn.Close()
 	}
+	defer C.EC_KEY_free(fsm.key)
 
-	fmt.Println("UDP server exiting...")
+	fmt.Println("client exiting...")
 
 }
 
@@ -205,6 +214,30 @@ func validatePort(port string) (int, error) {
 		return -1, errors.New("invalid port number")
 	}
 	return portNo, nil
+}
+
+func sendKey(wg *sync.WaitGroup, conn net.Conn) {
+	defer wg.Done()
+
+
+
+}
+
+func receiveKey(wg *sync.WaitGroup, conn net.Conn) {
+	defer wg.Done()
+
+
+}
+
+func getPublicKey(key C.EC_KEY) ([]byte, int, int) {
+	var x, y C.int
+	point := C.get_public_key(key, &x, &y)
+	defer C.free(unsafe.Pointer(point))
+
+	// 将C数组转换为Go切片
+	length := int(x + y)
+	keyBytes := C.GoBytes(unsafe.Pointer(point), C.int(length))
+	return keyBytes, int(x), int(y)
 }
 
 

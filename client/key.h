@@ -10,8 +10,9 @@
 EC_KEY *create_key(void);
 unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 			size_t *secret_len);
-char* get_public_key(EC_KEY* key);
+char* get_public_key(EC_KEY* key, int* x_length, int* y_length);
+char* get_public_key_str(EC_KEY* key);
 void free_string(char* str);
-char* get_private_key(EC_KEY* key);
+char* get_private_key_str(EC_KEY* key);
 
 #endif // KEY_H

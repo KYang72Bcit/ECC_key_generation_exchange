@@ -44,8 +44,34 @@ unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 	return secret;
 }
 
+char* get_public_key(EC_KEY* key, int* x_length, int* y_length) {
 
-char* get_public_key(EC_KEY* key) {
+    EC_POINT* point = EC_KEY_get0_public_key(key);
+    const EC_GROUP* group = EC_KEY_get0_group(key);
+    BIGNUM* x = BN_new();
+    BIGNUM* y = BN_new();
+    if (!x || !y) {
+		return NULL;
+	}
+
+    *x_length = BN_num_bytes(x); 
+    *y_length = BN_num_bytes(y); 
+    char* public_key = malloc(*x_length + *y_length);
+    if (!public_key) {
+        BN_free(x);
+        BN_free(y);
+        return NULL;
+    }
+
+    BN_bn2bin(x, (unsigned char*) public_key);
+    BN_bn2bin(y, (unsigned char*) (public_key + *x_length));
+
+    BN_free(x);
+    BN_free(y);
+    return public_key;
+}
+
+char* get_public_key_str(EC_KEY* key) {
     if (!key) return "Invalid key";
     EC_POINT* point = EC_KEY_get0_public_key(key);
     BIGNUM* x = BN_new();
@@ -63,7 +89,7 @@ char* get_public_key(EC_KEY* key) {
     return pub_key;
 }
 
-char* get_private_key(EC_KEY* key) {
+char* get_private_key_str(EC_KEY* key) {
 	if (!key) return "Invalid key";
 	BIGNUM* priv_key = EC_KEY_get0_private_key(key);
 	char *priv_key_str = BN_bn2dec(priv_key);
@@ -72,6 +98,7 @@ char* get_private_key(EC_KEY* key) {
     }
 	return priv_key_str;
 }
+
 
 void free_string(char* str) {
     free(str);
