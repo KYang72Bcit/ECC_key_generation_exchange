@@ -56,7 +56,7 @@ type ClientFSM struct {
 	port int
 	conn net.Conn
 	writer *bufio.ReadWriter
-	key *_Ctype_struct_ec_key_st
+	key *C.EC_KEY
 	// publicKey *_Ctype_char
 	// privateKey *_Ctype_char
 	privateKey string
@@ -168,7 +168,7 @@ func(fsm *ClientFSM) termination_state() {
 	if fsm.conn != nil {
 		fsm.conn.Close()
 	}
-	defer C.EC_KEY_free(fsm.key)
+	// defer C.EC_KEY_free(fsm.key)
 
 	fmt.Println("client exiting...")
 
@@ -229,7 +229,7 @@ func receiveKey(wg *sync.WaitGroup, conn net.Conn) {
 
 }
 
-func getPublicKey(key C.EC_KEY) ([]byte, int, int) {
+func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
 	var x, y C.int
 	point := C.get_public_key(key, &x, &y)
 	defer C.free(unsafe.Pointer(point))
