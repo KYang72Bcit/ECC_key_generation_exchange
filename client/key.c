@@ -55,7 +55,7 @@ char* get_public_key(EC_KEY* key) {
     if (!EC_POINT_get_affine_coordinates_GFp(EC_KEY_get0_group(key), point, x, y, NULL)) {
         strcpy(pub_key, "Error getting coordinates");
     } else {
-        sprintf(pub_key, "(%s, %s) on brainpoolP256r1", BN_bn2dec(x), BN_bn2dec(y));
+        sprintf(pub_key, "(%s, %s) on brainpoolP256r1 ", BN_bn2dec(x), BN_bn2dec(y));
     }
 
     BN_free(x);
