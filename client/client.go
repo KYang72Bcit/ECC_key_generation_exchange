@@ -52,7 +52,7 @@ type ClientFSM struct {
 	sharedSecret []byte
 	message string
 	ciphertext []byte
-}
+} 
 
 func NewClientFSM() *ClientFSM {
 	return &ClientFSM{
@@ -377,4 +377,34 @@ func main() {
 	sharedSecret := converter.Sum(nil)
 	encodedString := base64.StdEncoding.EncodeToString(sharedSecret)
     fmt.Println("Shared Secret:", encodedString)
+
+	plaintext := []byte("12345678901234567890123456789012") 
+	block, _ := aes.NewCipher(sharedSecret)
+	fmt.Println("plain text: ", string(plaintext))
+
+	var ciphertext[]byte
+	for start := 0; start < len(plaintext); start += aes.BlockSize {
+		chunk := make([]byte, aes.BlockSize)
+		block.Encrypt(chunk, plaintext[start:start+aes.BlockSize])
+		ciphertext = append(ciphertext, chunk...)
+	}
+	
+	fmt.Println("Ciphertext: ", base64.StdEncoding.EncodeToString(ciphertext))
+
+	
+
+	var decryptedText []byte
+	for start := 0; start < len(ciphertext); start += aes.BlockSize {
+		chunk := make([]byte, aes.BlockSize)
+		block.Decrypt(chunk, ciphertext[start:start+aes.BlockSize])
+		decryptedText = append(decryptedText, chunk...)
+	}
+
+
+	fmt.Printf("Decrypted text: %s\n", string(decryptedText))
+
+	
+	
+
+
 }
