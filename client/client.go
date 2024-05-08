@@ -7,6 +7,8 @@ package main
 */
 import "C"
 import (
+	"bufio"
+	"crypto/aes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -14,7 +16,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -47,6 +51,7 @@ type ClientFSM struct {
 	peerKey *C.EC_POINT
 	sharedSecret []byte
 	message string
+	ciphertext []byte
 }
 
 func NewClientFSM() *ClientFSM {
@@ -75,7 +80,6 @@ func(fsm *ClientFSM) init_state() ClientState {
 	}
 
 
-
 	return KeyGeneration
 }
 
@@ -85,15 +89,15 @@ func(fsm *ClientFSM) key_generation_state() ClientState {
 		fsm.err = errors.New("fail to generate key")
 		return FatalError
 	}
-	fsm.key = key
-	pubKeyStr := C.get_public_key_str(key)
-	privKeyStr := C.get_private_key_str(key)
-	defer C.free_string(pubKeyStr)
-	defer C.free_string(privKeyStr)
-	fsm.publicKey = C.GoString(pubKeyStr)
-	fsm.privateKey = C.GoString(privKeyStr)
-	fmt.Println("public key", fsm.publicKey)
-	fmt.Println("private key", fsm.privateKey)
+	// fsm.key = key
+	// pubKeyStr := C.get_public_key_str(key)
+	// privKeyStr := C.get_private_key_str(key)
+	// defer C.free_string(pubKeyStr)
+	// defer C.free_string(privKeyStr)
+	// fsm.publicKey = C.GoString(pubKeyStr)
+	// fsm.privateKey = C.GoString(privKeyStr)
+	// fmt.Println("public key", fsm.publicKey)
+	// fmt.Println("private key", fsm.privateKey)
 	return EstablishConnection
 }
 
@@ -143,19 +147,49 @@ func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
 }
 
 func(fsm *ClientFSM) get_user_input() ClientState {
-	return 1
+	reader := bufio.NewReader(os.Stdin)
+    
+	for {
+		fmt.Print("Enter input (longer than 32 bytes will be trimmed): ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Failed to read input:", err)
+			continue
+		} 
+		input = strings.TrimSuffix(input, "\n")
+		if len(input) > 32 {
+			fsm.message = input[:32]
+			break
+		} else {
+			for len(input) < 32 {
+				input += "\x00"
+			}
+			fsm.message = input
+			break
+		}
+	}
+	return Encryption
+    
 }
 
 func(fsm *ClientFSM) encryption_state() ClientState {
-	return 1
+	block, err := aes.NewCipher(fsm.sharedSecret)
+	if err != nil {
+		fsm.err = err
+		return FatalError
+	}
+	ciphertext := make([]byte, aes.BlockSize)
+	block.Encrypt(ciphertext, []byte(fsm.message))
+	ciphertext = fsm.ciphertext
+	return SendMessage	
 }
 
 func(fsm *ClientFSM) sent_message_state() ClientState {
-	_, fsm.err = fsm.conn.Write([]byte(*fsm.message))
+	_, fsm.err = fsm.conn.Write(fsm.ciphertext)
 	if fsm.err != nil {
 		return FatalError
 	}
-	return KeyExchange
+	return Termination
 
 }
 
