@@ -46,9 +46,7 @@ type ClientFSM struct {
 	port int
 	conn net.Conn
 	key *C.EC_KEY
-	privateKey string
-	publicKey string
-	peerKey *C.EC_POINT
+	peerPubKey *C.EC_POINT
 	sharedSecret []byte
 	message string
 	ciphertext []byte
@@ -89,7 +87,7 @@ func(fsm *ClientFSM) key_generation_state() ClientState {
 		fsm.err = errors.New("fail to generate key")
 		return FatalError
 	}
-	// fsm.key = key
+	fsm.key = key
 	// pubKeyStr := C.get_public_key_str(key)
 	// privKeyStr := C.get_private_key_str(key)
 	// defer C.free_string(pubKeyStr)
@@ -116,17 +114,23 @@ func(fsm *ClientFSM) key_exchange_state() ClientState {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go sendKey(&wg, fsm.conn, fsm.key, fsm.err)
-	go receiveKey(&wg, fsm.conn, fsm.peerKey, fsm.err)
+	go receiveKey(&wg, fsm.conn, fsm.peerPubKey, fsm.err)
 	wg.Wait()
 	if fsm.err != nil {
 		return FatalError
+	}
+
+	if fsm.peerPubKey == nil {
+		fsm.err = errors.New("Can not generate peer public key")
+		return FatalError
+		
 	}
 	return GenerateSharedSecret
 }
 
 
 func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
-	secret, err := getSharedSecret(fsm.key, fsm.peerKey)
+	secret, err := getSharedSecret(fsm.key, fsm.peerPubKey)
 	if err != nil {
 		fsm.err = err
 		return FatalError
@@ -141,7 +145,7 @@ func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
 	
 	fsm.sharedSecret = converter.Sum(nil)
 
-	fmt.Println("Shared Secret:", fsm.sharedSecret)
+	fmt.Println("Shared Secret:", string(fsm.sharedSecret))
 
 	return GetUserInput
 }
@@ -159,12 +163,14 @@ func(fsm *ClientFSM) get_user_input() ClientState {
 		input = strings.TrimSuffix(input, "\n")
 		if len(input) > 32 {
 			fsm.message = input[:32]
+			fmt.Println("Plain text: ", string(input))
 			break
 		} else {
 			for len(input) < 32 {
 				input += "\x00"
 			}
 			fsm.message = input
+			fmt.Println("Plain text: ", string(input))
 			break
 		}
 	}
@@ -181,6 +187,7 @@ func(fsm *ClientFSM) encryption_state() ClientState {
 	ciphertext := make([]byte, aes.BlockSize)
 	block.Encrypt(ciphertext, []byte(fsm.message))
 	ciphertext = fsm.ciphertext
+	fmt.Println("Ciphertext: ", string(ciphertext))
 	return SendMessage	
 }
 
@@ -201,6 +208,10 @@ func(fsm *ClientFSM) fatal_error_state() ClientState {
 func(fsm *ClientFSM) termination_state() {
 	if fsm.conn != nil {
 		fsm.conn.Close()
+	}
+
+	if fsm.key != nil {
+		C.EC_KEY_free(fsm.key)
 	}
 
 	fmt.Println("client exiting...")
@@ -249,7 +260,7 @@ func validatePort(port string) (int, error) {
 	return portNo, nil
 }
 
-func sendKey(wg *sync.WaitGroup, conn net.Conn,key *C.EC_KEY, er error) {
+func sendKey(wg *sync.WaitGroup, conn net.Conn, key *C.EC_KEY, er error) {
 	defer wg.Done()
 	keyToSend, x, y := getPublicKey(key)
 	xLength := int32(x)
@@ -284,7 +295,7 @@ func sendKey(wg *sync.WaitGroup, conn net.Conn,key *C.EC_KEY, er error) {
 	}
 }
 
-func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerKey *C.EC_POINT, er error) {
+func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerPubKey *C.EC_POINT, er error) {
 	defer wg.Done()
 	//get x length
 	bytes := make([]byte, 4)
@@ -310,7 +321,8 @@ func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerKey *C.EC_POINT, er error
 	xCor := key[:x]
 	yCor := key[x:]
 
-	peerKey = bytesToECPoint(xCor, yCor)
+	peerPubKey = bytesToECPoint(xCor, yCor)
+	
 }
 
 func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
@@ -328,7 +340,6 @@ func bytesToECPoint(xCor, yCor []byte) *C.EC_POINT {
 	y := C.CBytes(yCor)
 	defer C.free(unsafe.Pointer(x))
 	defer C.free(unsafe.Pointer(y))
-
 	return C.bytesToECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
 }
 
@@ -337,7 +348,7 @@ func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
 
 	secret := C.get_secret(key, peerPubKey, &secretLen)
 	if secret == nil {
-		return nil, fmt.Errorf("failed to generate shared secret")
+		return nil, errors.New("failed to generate shared secret")
 	}
 	defer C.OPENSSL_free(unsafe.Pointer(secret))
 
@@ -345,6 +356,17 @@ func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
 }
 
 func main() {
-	clientFSM := NewClientFSM()
-	clientFSM.Run()
+	// clientFSM := NewClientFSM()
+	// clientFSM.Run()
+
+	key := C.create_key()
+	keyToSend, x, _ := getPublicKey(key)
+	xCor := keyToSend[:x]
+	yCor := key[x:]
+
+	peerPubKey := bytesToECPoint(xCor, yCor)
+	secret, _ := getSharedSecret(key, peerPubKey)
+	fmt.Println(string(secret))
+
+
 }
