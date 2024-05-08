@@ -7,6 +7,7 @@ package main
 */
 import "C"
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -44,8 +45,8 @@ type ClientFSM struct {
 	privateKey string
 	publicKey string
 	peerKey *C.EC_POINT
-	shareSecret string
-	message *string
+	sharedSecret []byte
+	message string
 }
 
 func NewClientFSM() *ClientFSM {
@@ -58,11 +59,11 @@ func(fsm *ClientFSM) init_state() ClientState {
 
 	ip := flag.String("ip", "", "enter IP")
 	port := flag.String("port", "", "enter port")
-	msg := flag.String("message", "", "enter message")
+
 	flag.Parse()
 	fmt.Printf("ip %s\n", *ip)
 	fmt.Printf("port %s\n", *port)
-	fmt.Printf("message %s\n", *msg)
+
 	fsm.ip, fsm.err = validateIP(*ip)
 	if fsm.err != nil {
 		return FatalError
@@ -73,12 +74,7 @@ func(fsm *ClientFSM) init_state() ClientState {
 		return FatalError
 	}
 
-	if *msg == "" {
-		fsm.err = errors.New("No message to encrypt")
-		return FatalError
-	}
 
-	fsm.message = msg
 
 	return KeyGeneration
 }
@@ -108,16 +104,7 @@ func(fsm *ClientFSM) establish_connection_state() ClientState {
 	if fsm.err != nil {
 		return FatalError
 	}
-	return SendMessage
-}
-
-func(fsm *ClientFSM) sent_message_state() ClientState {
-	_, fsm.err = fsm.conn.Write([]byte(*fsm.message))
-	if fsm.err != nil {
-		return FatalError
-	}
 	return KeyExchange
-
 }
 
 
@@ -135,7 +122,24 @@ func(fsm *ClientFSM) key_exchange_state() ClientState {
 
 
 func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
-	return 1
+	secret, err := getSharedSecret(fsm.key, fsm.peerKey)
+	if err != nil {
+		fsm.err = err
+		return FatalError
+	}
+	converter := sha256.New()
+
+	_, er := converter.Write(secret)
+	if er != nil {
+		fsm.err = er
+		return FatalError
+	}
+	
+	fsm.sharedSecret = converter.Sum(nil)
+
+	fmt.Println("Shared Secret:", fsm.sharedSecret)
+
+	return GetUserInput
 }
 
 func(fsm *ClientFSM) get_user_input() ClientState {
@@ -144,6 +148,15 @@ func(fsm *ClientFSM) get_user_input() ClientState {
 
 func(fsm *ClientFSM) encryption_state() ClientState {
 	return 1
+}
+
+func(fsm *ClientFSM) sent_message_state() ClientState {
+	_, fsm.err = fsm.conn.Write([]byte(*fsm.message))
+	if fsm.err != nil {
+		return FatalError
+	}
+	return KeyExchange
+
 }
 
 func(fsm *ClientFSM) fatal_error_state() ClientState {
@@ -202,7 +215,6 @@ func validatePort(port string) (int, error) {
 	return portNo, nil
 }
 
-//goroutine should not have a return value 
 func sendKey(wg *sync.WaitGroup, conn net.Conn,key *C.EC_KEY, er error) {
 	defer wg.Done()
 	keyToSend, x, y := getPublicKey(key)
@@ -215,53 +227,52 @@ func sendKey(wg *sync.WaitGroup, conn net.Conn,key *C.EC_KEY, er error) {
 
 	if _, err := conn.Write(bytes); err != nil {
 		er = err
-		return 
+		return
 	}
 
 	//send y
 	binary.BigEndian.PutUint32(bytes, uint32(yLength))
 	if _, err := conn.Write(bytes); err != nil {
 		er = err
-		return 
+		return
 	}
 
 	//send key length
 	binary.BigEndian.PutUint32(bytes, uint32(keyLength))
 	if _, err := conn.Write(bytes); err != nil {
 		er = err
-		return 
+		return
 	}
 
 	if _, err := conn.Write(keyToSend); err != nil {
 		er = err
-		return 
+		return
 	}
 }
 
-// goroutine should not have a return value 
 func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerKey *C.EC_POINT, er error) {
 	defer wg.Done()
-	//get x length 
+	//get x length
 	bytes := make([]byte, 4)
-    if _, err := io.ReadFull(conn, bytes); err != nil {
-        er = err
+	if _, err := io.ReadFull(conn, bytes); err != nil {
+		er = err
 		return
-    }
-    x := binary.BigEndian.Uint32(bytes)
+	}
+	x := binary.BigEndian.Uint32(bytes)
 
 	//get y length
-    if _, err := io.ReadFull(conn, bytes); err != nil {
-        er = err
+	if _, err := io.ReadFull(conn, bytes); err != nil {
+		er = err
 		return
-    }
-    y := binary.BigEndian.Uint32(bytes)
+	}
+	y := binary.BigEndian.Uint32(bytes)
 
-    // get key 
-    key := make([]byte, x + y)
-    if _, err := io.ReadFull(conn, key); err != nil {
-        er = err
+	// get key
+	key := make([]byte, x + y)
+	if _, err := io.ReadFull(conn, key); err != nil {
+		er = err
 		return
-    }
+	}
 	xCor := key[:x]
 	yCor := key[x:]
 
@@ -279,12 +290,24 @@ func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
 }
 
 func bytesToECPoint(xCor, yCor []byte) *C.EC_POINT {
-    x := C.CBytes(xCor)
-    y := C.CBytes(yCor)
-    defer C.free(unsafe.Pointer(x))
-    defer C.free(unsafe.Pointer(y))
+	x := C.CBytes(xCor)
+	y := C.CBytes(yCor)
+	defer C.free(unsafe.Pointer(x))
+	defer C.free(unsafe.Pointer(y))
 
-    return C.bytesToECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
+	return C.bytesToECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
+}
+
+func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
+	var secretLen C.size_t
+
+	secret := C.get_secret(key, peerPubKey, &secretLen)
+	if secret == nil {
+		return nil, fmt.Errorf("failed to generate shared secret")
+	}
+	defer C.OPENSSL_free(unsafe.Pointer(secret))
+
+	return C.GoBytes(unsafe.Pointer(secret), C.int(secretLen)), nil
 }
 
 func main() {

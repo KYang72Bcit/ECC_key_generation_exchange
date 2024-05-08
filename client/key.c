@@ -112,7 +112,7 @@ EC_POINT* bytesToECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes,
 	if (!new_key) {
 		BN_free(x);               
 		BN_free(y);
-		return NULL
+		return NULL;
 	}
 
 	const EC_GROUP *group = EC_KEY_get0_group(new_key);
@@ -120,19 +120,19 @@ EC_POINT* bytesToECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes,
 	if (!pub_key) {
 		BN_free(x);               
 		BN_free(y);
-		return NULL
+		return NULL;
 	}
 
 	if (!EC_POINT_set_affine_coordinates_GFp(group, pub_key, x, y, NULL)) {
 		BN_free(x);               
 		BN_free(y);
-		return NULL
+		return NULL;
 	}
 
     BN_free(x);               
 	BN_free(y);
 
-	return pub_key
+	return pub_key;
 }
 
 void free_string(char* str) {
