@@ -6,6 +6,7 @@
 #include <openssl/obj_mac.h>
 #include <openssl/ecdh.h>
 #include <openssl/evp.h>
+#include <openssl/crypto.h>
 
 EC_KEY *create_key(void);
 unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,

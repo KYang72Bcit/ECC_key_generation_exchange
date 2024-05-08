@@ -5,6 +5,7 @@
 #include <openssl/evp.h>
 #include <openssl/bn.h>
 
+
 EC_KEY *create_key(void)
 {
 	EC_KEY *key;
@@ -45,17 +46,26 @@ unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 }
 
 char* get_public_key(EC_KEY* key, int* x_length, int* y_length) {
-
     EC_POINT* point = EC_KEY_get0_public_key(key);
     const EC_GROUP* group = EC_KEY_get0_group(key);
     BIGNUM* x = BN_new();
     BIGNUM* y = BN_new();
+
     if (!x || !y) {
-		return NULL;
-	}
+        if (x) BN_free(x);
+        if (y) BN_free(y);
+        return NULL;
+    }
+
+    if (!EC_POINT_get_affine_coordinates_GFp(group, point, x, y, NULL)) {
+        BN_free(x);
+        BN_free(y);
+        return NULL;
+    }
 
     *x_length = BN_num_bytes(x); 
     *y_length = BN_num_bytes(y); 
+
     char* public_key = malloc(*x_length + *y_length);
     if (!public_key) {
         BN_free(x);

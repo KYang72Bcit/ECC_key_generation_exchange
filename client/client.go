@@ -4,12 +4,14 @@ package main
 #cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include
 #cgo LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -lcrypto -L. -lcry
 #include "key.h"
+#include <openssl/crypto.h>
 */
 import "C"
 import (
 	"bufio"
 	"crypto/aes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -144,8 +146,8 @@ func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
 	}
 	
 	fsm.sharedSecret = converter.Sum(nil)
-
-	fmt.Println("Shared Secret:", string(fsm.sharedSecret))
+	encodedString := base64.StdEncoding.EncodeToString(fsm.sharedSecret)
+    fmt.Println("Shared Secret:", encodedString)
 
 	return GetUserInput
 }
@@ -350,7 +352,7 @@ func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
 	if secret == nil {
 		return nil, errors.New("failed to generate shared secret")
 	}
-	defer C.OPENSSL_free(unsafe.Pointer(secret))
+	defer C.free(unsafe.Pointer(secret))
 
 	return C.GoBytes(unsafe.Pointer(secret), C.int(secretLen)), nil
 }
@@ -360,13 +362,19 @@ func main() {
 	// clientFSM.Run()
 
 	key := C.create_key()
+
 	keyToSend, x, _ := getPublicKey(key)
 	xCor := keyToSend[:x]
-	yCor := key[x:]
+	yCor := keyToSend[x:]
 
 	peerPubKey := bytesToECPoint(xCor, yCor)
 	secret, _ := getSharedSecret(key, peerPubKey)
-	fmt.Println(string(secret))
+	converter := sha256.New()
 
-
+	converter.Write(secret)
+	
+	
+	sharedSecret := converter.Sum(nil)
+	encodedString := base64.StdEncoding.EncodeToString(sharedSecret)
+    fmt.Println("Shared Secret:", encodedString)
 }
