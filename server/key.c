@@ -81,13 +81,12 @@ char* get_public_key(EC_KEY* key, int* x_length, int* y_length) {
     return public_key;
 }
 
-
 EC_POINT* bytesToECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes, int yLen) {
     BIGNUM *x = BN_bin2bn(xBytes, xLen, NULL);
     BIGNUM *y = BN_bin2bn(yBytes, yLen, NULL);
     if (x == NULL || y == NULL) {
-		if (x) BN_free(x);
-        if (y) BN_free(y);
+		BN_free(x);               
+		BN_free(y);
         return NULL; 
     }
 

@@ -16,7 +16,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -31,7 +30,6 @@ const(
 	Init ClientState = iota
 	KeyGeneration
 	EstablishConnection
-	SendMessage
 	KeyExchange
 	GenerateSharedSecret
 	GetUserInput
@@ -40,6 +38,8 @@ const(
 	FatalError
 	Termination
 )
+
+const bufferSize = 32
 
 type ClientFSM struct {
 	currentState ClientState
@@ -52,6 +52,8 @@ type ClientFSM struct {
 	sharedSecret []byte
 	message string
 	ciphertext []byte
+	writer *bufio.Writer
+	reader *bufio.Reader
 } 
 
 func NewClientFSM() *ClientFSM {
@@ -79,7 +81,7 @@ func(fsm *ClientFSM) init_state() ClientState {
 		return FatalError
 	}
 
-
+	fmt.Println("init state")
 	return KeyGeneration
 }
 
@@ -90,14 +92,7 @@ func(fsm *ClientFSM) key_generation_state() ClientState {
 		return FatalError
 	}
 	fsm.key = key
-	// pubKeyStr := C.get_public_key_str(key)
-	// privKeyStr := C.get_private_key_str(key)
-	// defer C.free_string(pubKeyStr)
-	// defer C.free_string(privKeyStr)
-	// fsm.publicKey = C.GoString(pubKeyStr)
-	// fsm.privateKey = C.GoString(privKeyStr)
-	// fmt.Println("public key", fsm.publicKey)
-	// fmt.Println("private key", fsm.privateKey)
+	fmt.Println("key generation state")
 	return EstablishConnection
 }
 
@@ -108,6 +103,9 @@ func(fsm *ClientFSM) establish_connection_state() ClientState {
 	if fsm.err != nil {
 		return FatalError
 	}
+	fmt.Println("establish connection state")
+	fsm.writer = bufio.NewWriter(fsm.conn)
+	fsm.reader = bufio.NewReader(fsm.conn)
 	return KeyExchange
 }
 
@@ -115,8 +113,8 @@ func(fsm *ClientFSM) establish_connection_state() ClientState {
 func(fsm *ClientFSM) key_exchange_state() ClientState {
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go sendKey(&wg, fsm.conn, fsm.key, fsm.err)
-	go receiveKey(&wg, fsm.conn, fsm.peerPubKey, fsm.err)
+	go sendKey(&wg, fsm.key, fsm.err, fsm.writer)
+	go receiveKey(&wg, fsm.reader, &fsm.peerPubKey, fsm.err)
 	wg.Wait()
 	if fsm.err != nil {
 		return FatalError
@@ -124,9 +122,10 @@ func(fsm *ClientFSM) key_exchange_state() ClientState {
 
 	if fsm.peerPubKey == nil {
 		fsm.err = errors.New("Can not generate peer public key")
-		return FatalError
-		
+		return FatalError	
 	}
+	
+	fmt.Println("key exchange state")
 	return GenerateSharedSecret
 }
 
@@ -186,15 +185,20 @@ func(fsm *ClientFSM) encryption_state() ClientState {
 		fsm.err = err
 		return FatalError
 	}
-	ciphertext := make([]byte, aes.BlockSize)
-	block.Encrypt(ciphertext, []byte(fsm.message))
-	ciphertext = fsm.ciphertext
-	fmt.Println("Ciphertext: ", string(ciphertext))
-	return SendMessage	
+
+	var ciphertext[]byte
+	plaintext := []byte(fsm.message)
+	for start := 0; start < len(plaintext); start += aes.BlockSize {
+		chunk := make([]byte, aes.BlockSize)
+		block.Encrypt(chunk, plaintext[start:start+aes.BlockSize])
+		ciphertext = append(ciphertext, chunk...)
+	}
+	fmt.Println("Ciphertext: ", base64.StdEncoding.EncodeToString(ciphertext))
+	return SendString
 }
 
 func(fsm *ClientFSM) sent_message_state() ClientState {
-	_, fsm.err = fsm.conn.Write(fsm.ciphertext)
+	_, fsm.err = sendBytes(fsm.writer, fsm.ciphertext)
 	if fsm.err != nil {
 		return FatalError
 	}
@@ -214,6 +218,7 @@ func(fsm *ClientFSM) termination_state() {
 
 	if fsm.key != nil {
 		C.EC_KEY_free(fsm.key)
+		
 	}
 
 	fmt.Println("client exiting...")
@@ -262,68 +267,36 @@ func validatePort(port string) (int, error) {
 	return portNo, nil
 }
 
-func sendKey(wg *sync.WaitGroup, conn net.Conn, key *C.EC_KEY, er error) {
+func sendKey(wg *sync.WaitGroup, key *C.EC_KEY, err error, writer *bufio.Writer) {
 	defer wg.Done()
 	keyToSend, x, y := getPublicKey(key)
-	xLength := int32(x)
-	yLength := int32(y)
-	keyLength := xLength + yLength
-	bytes := make([]byte, 4)
-	//send x
-	binary.BigEndian.PutUint32(bytes, uint32(xLength))
-
-	if _, err := conn.Write(bytes); err != nil {
-		er = err
-		return
-	}
-
-	//send y
-	binary.BigEndian.PutUint32(bytes, uint32(yLength))
-	if _, err := conn.Write(bytes); err != nil {
-		er = err
-		return
-	}
-
-	//send key length
-	binary.BigEndian.PutUint32(bytes, uint32(keyLength))
-	if _, err := conn.Write(bytes); err != nil {
-		er = err
-		return
-	}
-
-	if _, err := conn.Write(keyToSend); err != nil {
-		er = err
-		return
-	}
+	fmt.Println("key send", base64.StdEncoding.EncodeToString(keyToSend))
+	err = sendInt(writer, x)
+	err = sendInt(writer, y)
+	_, err = sendBytes(writer, keyToSend)
 }
 
-func receiveKey(wg *sync.WaitGroup, conn net.Conn, peerPubKey *C.EC_POINT, er error) {
+func receiveKey(wg *sync.WaitGroup, reader *bufio.Reader, peerPubKey **C.EC_POINT, err error) {
 	defer wg.Done()
-	//get x length
-	bytes := make([]byte, 4)
-	if _, err := io.ReadFull(conn, bytes); err != nil {
-		er = err
-		return
-	}
-	x := binary.BigEndian.Uint32(bytes)
+	x, err := receiveInt(reader)
+	y, err := receiveInt(reader)
+	key, err := receiveBytes(reader)
+	fmt.Println("key received", base64.StdEncoding.EncodeToString(key))
 
-	//get y length
-	if _, err := io.ReadFull(conn, bytes); err != nil {
-		er = err
-		return
-	}
-	y := binary.BigEndian.Uint32(bytes)
-
-	// get key
-	key := make([]byte, x + y)
-	if _, err := io.ReadFull(conn, key); err != nil {
-		er = err
-		return
-	}
+	fmt.Println("receive X: ", x)
+	fmt.Println("receive y: ", y)
 	xCor := key[:x]
 	yCor := key[x:]
 
-	peerPubKey = bytesToECPoint(xCor, yCor)
+	*peerPubKey = bytesToECPoint(xCor, yCor)
+	if peerPubKey == nil {
+		fmt.Printf("peer pucblic key is null")
+	} else {
+
+		fmt.Printf("peer pucblic key is NOT null")
+	}
+
+	
 	
 }
 
@@ -358,53 +331,84 @@ func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
 }
 
 func main() {
-	// clientFSM := NewClientFSM()
-	// clientFSM.Run()
+	clientFSM := NewClientFSM()
+	clientFSM.Run()
 
-	key := C.create_key()
+}
 
-	keyToSend, x, _ := getPublicKey(key)
-	xCor := keyToSend[:x]
-	yCor := keyToSend[x:]
-
-	peerPubKey := bytesToECPoint(xCor, yCor)
-	secret, _ := getSharedSecret(key, peerPubKey)
-	converter := sha256.New()
-
-	converter.Write(secret)
-	
-	
-	sharedSecret := converter.Sum(nil)
-	encodedString := base64.StdEncoding.EncodeToString(sharedSecret)
-    fmt.Println("Shared Secret:", encodedString)
-
-	plaintext := []byte("12345678901234567890123456789012") 
-	block, _ := aes.NewCipher(sharedSecret)
-	fmt.Println("plain text: ", string(plaintext))
-
-	var ciphertext[]byte
-	for start := 0; start < len(plaintext); start += aes.BlockSize {
-		chunk := make([]byte, aes.BlockSize)
-		block.Encrypt(chunk, plaintext[start:start+aes.BlockSize])
-		ciphertext = append(ciphertext, chunk...)
+func receiveBytes(reader *bufio.Reader) ([]byte, error) {
+	size, err := receiveInt(reader)
+	if err != nil {
+		return nil, err
 	}
-	
-	fmt.Println("Ciphertext: ", base64.StdEncoding.EncodeToString(ciphertext))
+	data := make([]byte, size)
+	received := 0
 
-	
+	for received < size {
+		remaining := size - received
+		readSize := bufferSize
+		if remaining < readSize {
+			readSize = remaining
+		}
 
-	var decryptedText []byte
-	for start := 0; start < len(ciphertext); start += aes.BlockSize {
-		chunk := make([]byte, aes.BlockSize)
-		block.Decrypt(chunk, ciphertext[start:start+aes.BlockSize])
-		decryptedText = append(decryptedText, chunk...)
+		n, err := reader.Read(data[received : received+readSize])
+		if err != nil {
+			return nil, err
+		}
+
+		received += n
 	}
 
-
-	fmt.Printf("Decrypted text: %s\n", string(decryptedText))
-
-	
-	
+	return data, nil
+}
 
 
+func receiveInt(reader *bufio.Reader) (int, error) {
+	receivedByte := make([]byte, 4)
+	_, err := reader.Read(receivedByte)
+	if err != nil {
+		return -1, err
+	}
+	receiveInt := binary.BigEndian.Uint32(receivedByte)
+
+	return int(receiveInt), nil
+}
+
+func sendInt(writer *bufio.Writer, num int) (error) {
+	intSend := int32(num)
+	sendBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(sendBytes, uint32(intSend))
+	_, err := writer.Write(sendBytes)
+	if err != nil {
+		return err
+	}
+	return writer.Flush()
+}
+
+// sendBytes sends the provided byte array to the provided writer
+// It returns an int of the number of data it send, and error if the writer cannot be written to
+// error will be nil if there's no error
+func sendBytes(writer *bufio.Writer, data []byte) (int, error) {
+	err := sendInt(writer, len(data))
+	if err != nil {
+		return -1, err
+	}
+
+	for start := 0; start < len(data); start += bufferSize {
+		end := start + bufferSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		chunk := data[start:end]
+		_, err := writer.Write(chunk)
+		if err != nil {
+			return -1, err
+		}
+		err = writer.Flush()
+		if err != nil {
+			return -1, err
+		}
+	}
+	return len(data), nil
 }
