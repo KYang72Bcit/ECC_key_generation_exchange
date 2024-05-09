@@ -1,25 +1,22 @@
 #include <openssl/ec.h>
-#include <openssl/err.h>
 #include <openssl/obj_mac.h>
 #include <openssl/ecdh.h>
-#include <openssl/evp.h>
 #include <openssl/bn.h>
 
 
 EC_KEY *create_key(void)
 {
 	EC_KEY *key;
-	if (NULL == (key = EC_KEY_new_by_curve_name(NID_brainpoolP256r1))) {
-		return NULL;
-	}
+	key = EC_KEY_new_by_curve_name(NID_brainpoolP256r1);
+	if (!key) return NULL ;
 
-	if (1 != EC_KEY_generate_key(key)) {
+	if (EC_KEY_generate_key(key) != 1) {
 		return NULL;
 	}
 	return key;
 }
 
-unsigned char* get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
+unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 			size_t *secret_len)
 {
 	int field_size;
@@ -28,12 +25,10 @@ unsigned char* get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 	field_size = EC_GROUP_get_degree(EC_KEY_get0_group(key));
 	*secret_len = (field_size + 7) / 8;
 
-	if (NULL == (secret = OPENSSL_malloc(*secret_len))) {
-		return NULL;
-	}
-
-	*secret_len = ECDH_compute_key(secret, *secret_len,
-					peer_pub_key, key, NULL);
+	secret = OPENSSL_malloc(*secret_len);
+	if (!secret) return NULL; 
+	
+	*secret_len = ECDH_compute_key(secret, *secret_len, peer_pub_key, key, NULL);
 
 	if (*secret_len <= 0) {
 		OPENSSL_free(secret);

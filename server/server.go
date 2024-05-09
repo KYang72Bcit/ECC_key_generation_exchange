@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include
+#cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include -Wno-deprecated-declarations
 #cgo LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -lcrypto -L. -lcry
 #include "key.h"
 #include <openssl/crypto.h>
@@ -31,7 +31,7 @@ const(
 	KeyExchange
 	GenerateSharedSecret
 	ReceivedString
-	Dencryption
+	Decryption
 	FatalError
 	Termination
 )
@@ -47,7 +47,6 @@ type ServerFSM struct {
 	key *C.EC_KEY
 	peerPubKey *C.EC_POINT
 	sharedSecret []byte
-	message string
 	ciphertext []byte
 	writer *bufio.Writer
 	reader *bufio.Reader
@@ -118,7 +117,6 @@ func(fsm *ServerFSM) key_exchange_state() ServerState {
 		fsm.err = errors.New("Can not generate peer public key")
 		return FatalError
 	}
-	fmt.Println("key exchange state")
 	return GenerateSharedSecret
 }
 
@@ -137,7 +135,7 @@ func(fsm *ServerFSM) generate_shared_secret_state() ServerState {
 	}
 	fsm.sharedSecret = converter.Sum(nil)
 	encodedString := base64.StdEncoding.EncodeToString(fsm.sharedSecret)
-	fmt.Println("Shared Secret:", encodedString)
+	fmt.Println("Shared Secret Generated: ", encodedString)
 	return ReceivedString
 }
 
@@ -148,13 +146,12 @@ func(fsm *ServerFSM) receive_string_state() ServerState {
 		return FatalError
 	}
 	fmt.Println("Received Ciphertext: ", base64.StdEncoding.EncodeToString(fsm.ciphertext))
-	return Dencryption
+	return Decryption
 }
 
 func(fsm *ServerFSM) decode_state() ServerState {
 
 	block, _ := aes.NewCipher(fsm.sharedSecret)
-
 
 	var decryptedText []byte
 	for start := 0; start < len(fsm.ciphertext); start += aes.BlockSize {
@@ -200,7 +197,7 @@ func (fsm *ServerFSM) Run() {
 				fsm.currentState = fsm.generate_shared_secret_state()
 			case ReceivedString:
 				fsm.currentState = fsm.receive_string_state()
-			case Dencryption:
+			case Decryption:
 				fsm.currentState = fsm.decode_state()
 			case FatalError:
 				fsm.currentState = fsm.fatal_error_state()
@@ -335,9 +332,6 @@ func sendInt(writer *bufio.Writer, num int) (error) {
 	return writer.Flush()
 }
 
-// sendBytes sends the provided byte array to the provided writer
-// It returns an int of the number of data it send, and error if the writer cannot be written to
-// error will be nil if there's no error
 func sendBytes(writer *bufio.Writer, data []byte) (int, error) {
 	err := sendInt(writer, len(data))
 	if err != nil {

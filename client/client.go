@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include
+#cgo CFLAGS: -I/opt/homebrew/opt/openssl@3/include -Wno-deprecated-declarations
 #cgo LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -lcrypto -L. -lcry
 #include "key.h"
 #include <openssl/crypto.h>
@@ -139,7 +139,7 @@ func(fsm *ClientFSM) generate_shared_secret_state() ClientState {
 	
 	fsm.sharedSecret = converter.Sum(nil)
 	encodedString := base64.StdEncoding.EncodeToString(fsm.sharedSecret)
-    fmt.Println("Shared Secret:", encodedString)
+    fmt.Println("Shared Secret Generated: ", encodedString)
 
 	return GetUserInput
 }
@@ -187,7 +187,7 @@ func(fsm *ClientFSM) encryption_state() ClientState {
 		ciphertext = append(ciphertext, chunk...)
 	}
 	fsm.ciphertext = ciphertext
-	fmt.Println("Ciphertext: ", base64.StdEncoding.EncodeToString(fsm.ciphertext))
+	fmt.Println("Ciphertext Sent: ", base64.StdEncoding.EncodeToString(fsm.ciphertext))
 	return SendString
 }
 
