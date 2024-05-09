@@ -64,10 +64,8 @@ func(fsm *ServerFSM) init_state() ServerState {
 	port := flag.String("port", "", "enter port")
 
 	flag.Parse()
-	fmt.Printf("ip %s\n", *ip)
-	fmt.Printf("port %s\n", *port)
-
 	fsm.ip, fsm.err = validateIP(*ip)
+
 	if fsm.err != nil {
 		return FatalError
 	}
@@ -77,7 +75,6 @@ func(fsm *ServerFSM) init_state() ServerState {
 		return FatalError
 	}
 
-	fmt.Println("init state")
 	return KeyGeneration
 }
 
@@ -88,7 +85,6 @@ func(fsm *ServerFSM) key_generation_state() ServerState {
 		return FatalError
 	}
 	fsm.key = key
-	fmt.Println("key generation state")
 	return EstablishConnection
 }
 
@@ -98,12 +94,11 @@ func(fsm *ServerFSM) establish_connection_state() ServerState {
 	if fsm.err != nil {
 		return FatalError
 	}
-	fmt.Println("server listening on port: ", fsm.port)
+	fmt.Println("server listening on port:", fsm.port)
 	fsm.conn, fsm.err = fsm.listener.Accept()
 	if fsm.err != nil {
 		return FatalError
 	}
-	fmt.Println("establish connection state")
 	fsm.writer = bufio.NewWriter(fsm.conn)
 	fsm.reader = bufio.NewReader(fsm.conn)
 	return KeyExchange
@@ -140,7 +135,6 @@ func(fsm *ServerFSM) generate_shared_secret_state() ServerState {
 		fsm.err = er
 		return FatalError
 	}
-	fmt.Println("generate shared secret state")
 	fsm.sharedSecret = converter.Sum(nil)
 	encodedString := base64.StdEncoding.EncodeToString(fsm.sharedSecret)
 	fmt.Println("Shared Secret:", encodedString)
@@ -153,11 +147,12 @@ func(fsm *ServerFSM) receive_string_state() ServerState {
 	if (fsm.err != nil ) {
 		return FatalError
 	}
+	fmt.Println("Received Ciphertext: ", base64.StdEncoding.EncodeToString(fsm.ciphertext))
 	return Dencryption
 }
 
 func(fsm *ServerFSM) decode_state() ServerState {
-	fmt.Println("Ciphertext: ", base64.StdEncoding.EncodeToString(fsm.ciphertext))
+
 	block, _ := aes.NewCipher(fsm.sharedSecret)
 
 
@@ -236,7 +231,7 @@ func validatePort(port string) (int, error) {
 func sendKey(wg *sync.WaitGroup, key *C.EC_KEY, err error, writer *bufio.Writer) {
 	defer wg.Done()
 	keyToSend, x, y := getPublicKey(key)
-	fmt.Println("key send", base64.StdEncoding.EncodeToString(keyToSend))
+	fmt.Println("public key send", base64.StdEncoding.EncodeToString(keyToSend))
 	err = sendInt(writer, x)
 	err = sendInt(writer, y)
 	_, err = sendBytes(writer, keyToSend)
@@ -248,7 +243,7 @@ func receiveKey(wg *sync.WaitGroup, reader *bufio.Reader, peerPubKey **C.EC_POIN
 	x, err := receiveInt(reader)
 	y, err := receiveInt(reader)
 	key, err := receiveBytes(reader)
-	fmt.Println("key received", base64.StdEncoding.EncodeToString(key))
+	fmt.Println("public key received", base64.StdEncoding.EncodeToString(key))
 
 	xCor := key[:x]
 	yCor := key[x: x + y]
@@ -272,7 +267,7 @@ func bytesToECPoint(xCor, yCor []byte) *C.EC_POINT {
 	y := C.CBytes(yCor)
 	defer C.free(unsafe.Pointer(x))
 	defer C.free(unsafe.Pointer(y))
-	return C.bytesToECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
+	return C.bytes_to_ECPoint((*C.uchar)(x), C.int(len(xCor)), (*C.uchar)(y), C.int(len(yCor)))
 }
 
 func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {

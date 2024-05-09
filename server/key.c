@@ -21,7 +21,7 @@ EC_KEY *create_key(void)
 	return key;
 }
 
-unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
+unsigned char* get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 			size_t *secret_len)
 {
 	int field_size;
@@ -81,7 +81,7 @@ char* get_public_key(EC_KEY* key, int* x_length, int* y_length) {
     return public_key;
 }
 
-EC_POINT* bytesToECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes, int yLen) {
+EC_POINT* bytes_to_ECPoint(unsigned char* xBytes, int xLen, unsigned char* yBytes, int yLen) {
     BIGNUM *x = BN_bin2bn(xBytes, xLen, NULL);
     BIGNUM *y = BN_bin2bn(yBytes, yLen, NULL);
     if (x == NULL || y == NULL) {
