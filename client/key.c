@@ -10,12 +10,10 @@ EC_KEY *create_key(void)
 {
 	EC_KEY *key;
 	if (NULL == (key = EC_KEY_new_by_curve_name(NID_brainpoolP256r1))) {
-		printf("Failed to create key curve\n");
 		return NULL;
 	}
 
 	if (1 != EC_KEY_generate_key(key)) {
-		printf("Failed to generate key\n");
 		return NULL;
 	}
 	return key;
@@ -31,7 +29,6 @@ unsigned char *get_secret(EC_KEY *key, const EC_POINT *peer_pub_key,
 	*secret_len = (field_size + 7) / 8;
 
 	if (NULL == (secret = OPENSSL_malloc(*secret_len))) {
-		printf("Failed to allocate memory for secret");
 		return NULL;
 	}
 
