@@ -283,8 +283,7 @@ func receiveKey(wg *sync.WaitGroup, reader *bufio.Reader, peerPubKey **C.EC_POIN
 	yCor := key[x: x + y]
 
 	*peerPubKey = bytesToECPoint(xCor, yCor)
-		
-	
+			
 }
 
 func getPublicKey(key *C.EC_KEY) ([]byte, int, int) {
@@ -315,12 +314,6 @@ func getSharedSecret(key *C.EC_KEY, peerPubKey *C.EC_POINT) ([]byte, error) {
 	defer C.free(unsafe.Pointer(secret))
 
 	return C.GoBytes(unsafe.Pointer(secret), C.int(secretLen)), nil
-}
-
-func main() {
-	clientFSM := NewClientFSM()
-	clientFSM.Run()
-
 }
 
 func receiveBytes(reader *bufio.Reader) ([]byte, error) {
@@ -394,4 +387,11 @@ func sendBytes(writer *bufio.Writer, data []byte) (int, error) {
 		}
 	}
 	return len(data), nil
+}
+
+
+func main() {
+	clientFSM := NewClientFSM()
+	clientFSM.Run()
+
 }
